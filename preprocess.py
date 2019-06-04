@@ -14,15 +14,11 @@ import nntools as nt
 import json
 import re
 from collections import defaultdict
-
 from nltk.stem.porter import *
 import string
 from nltk.tokenize import word_tokenize
 
-images_dir = '/datasets/ee285f-public/VQA2017/'
-q_dir = '/datasets/ee285f-public/VQA2017/v2_OpenEnded_mscoco_'
-ans_dir = '/datasets/ee285f-public/VQA2017/v2_mscoco_'
-
+#entire cell uses code found: https://github.com/zcyang/imageqa-san/blob/master/data_vqa/process_function.py
 def process_sentence(sentence):
     periodStrip  = re.compile("(?!<=\d)(\.)(?!\d)")
     commaStrip   = re.compile("(\d)(\,)(\d)")
@@ -115,24 +111,8 @@ class MSCOCODataset(td.Dataset):
             self.a_json = json.load(f)['annotations']
         
         
-        # question parsing
-        
-        self.questions = []
-        self.vocab_q = set()
-        for q in self.q_json:
-            processed = process_sentence(q['question'])
-            
-            self.questions.append(processed)
-            
-            for each in processed.split(" "):
-                self.vocab_q.add(each)
-            
-        self.vocab_q = {word : i for i, word in enumerate(self.vocab_q)}
-        
-        
-        
         # answering parsing
-        
+            
         self.answers = []
         self.vocab_a = defaultdict(int)
         
@@ -145,11 +125,34 @@ class MSCOCODataset(td.Dataset):
                 self.vocab_a[each] += 1
         
         self.vocab_a = sorted(self.vocab_a.items(), key=lambda x : x[1], reverse=True)
-        self.vocab_a = {self.vocab_a[i][0] : i for i in range(top_num)} 
-
+        self.vocab_a = {self.vocab_a[i][0] : i for i in range(top_num)}
+        
+        
+        self.top_answers = []
+        self.top_questions = []
+        self.top_images = []
+        
+        for i, each in enumerate(self.answers):
+            if all(word in self.vocab_a for word in each.split(" ")):
+                self.top_answers.append(each)
+                self.top_questions.append(process_sentence(self.q_json[i]['question']))
+                self.top_images.append(str(self.q_json[i]['image_id']))
+        
+        
+        
+        # question parsing
+        
+        self.vocab_q = set()
+        for q in self.top_questions:
+            for each in q.split(" "):
+                self.vocab_q.add(each)
+        self.vocab_q = {word : i for i, word in enumerate(self.vocab_q)}
+        
+        self.seq_length = max([len(x.split(" ")) for x in self.top_questions])
+                
     
     def __len__(self):
-        return len(self.questions)
+        return len(self.top_questions)
     
     def __repr__(self):
         return "MSCOCODataset(mode={}, image_size={})" . \
@@ -169,17 +172,14 @@ class MSCOCODataset(td.Dataset):
         for i, word in enumerate(inp.split(" ")):
             vec[mapping[word], i] = 1
         
-        print(inp)
-        print(vec)
-        
         return vec
-            
+        
                         
     def __getitem__(self, idx):
-        q = self.questions[idx]
-        a = self.answers[idx]
-        img_id = str(self.q_json[idx]['image_id'])
- 
+        q = self.top_questions[idx]
+        a = self.top_answers[idx]
+        img_id = self.top_images[idx]
+         
         img_path = os.path.join(self.root_image, "COCO_%s2014_%s.jpg" % (self.mode, img_id.zfill(12)))
         
         img = Image.open(img_path).convert("RGB")
@@ -193,4 +193,8 @@ class MSCOCODataset(td.Dataset):
         one_hot_q = self.one_hot_question(q, self.vocab_q)
         one_hot_ans = self.one_hot_answer(a, self.vocab_a)
         
-        return x, one_hot_q, one_hot_ans
+        target_q = torch.zeros(len(self.vocab_q), self.seq_length)
+        target_q[:, :one_hot_q.shape[1]] = one_hot_q
+
+        
+        return x, target_q, one_hot_ans
