@@ -13,22 +13,24 @@ import torch
 from models import *
 from preprocess import *
 
+images_dir = '/datasets/ee285f-public/VQA2017/'
+q_dir = '/datasets/ee285f-public/VQA2017/v2_OpenEnded_mscoco_'
+ans_dir = '/datasets/ee285f-public/VQA2017/v2_mscoco_'
+
+train_set = MSCOCODataset(images_dir, q_dir, 
+                          ans_dir, mode='train', 
+                          image_size=(448, 448))
+
 class SANExperiment():
-    def __init__(self, output_dir, batch_size=10,
+    def __init__(self, train_set, output_dir, batch_size=10,
                  perform_validation_during_training=False,
-                 lr=0.01, weight_decay=0.025,
-                 num_epochs=10):
+                 lr=0.01, weight_decay=0.5,
+                 num_epochs=3):
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
-        images_dir = '/datasets/ee285f-public/VQA2017/'
-        q_dir = '/datasets/ee285f-public/VQA2017/v2_OpenEnded_mscoco_'
-        ans_dir = '/datasets/ee285f-public/VQA2017/v2_mscoco_'
+        self.train_set = train_set
         
-        self.train_set = MSCOCODataset(images_dir, q_dir, 
-                              ans_dir, mode='train', 
-                              image_size=(448, 448))
-        
-        indices = np.random.permutation(len(self.train_set))
+        indices = np.random.permutation(int(len(self.train_set) * 0.013))
         train_ind = indices[:int(len(indices)*0.8)]
         val_ind = indices[int(len(indices)*0.8):]
         train_sampler = torch.utils.data.sampler.SubsetRandomSampler(train_ind)
@@ -45,7 +47,7 @@ class SANExperiment():
                          vocab_size=len(self.train_set.vocab_q), embedding_dim=1000,
                          output_vgg=1024, input_attention=1024, output_attention=512).to(self.device)
         self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.SGD(self.model.parameters(), 
+        self.optimizer = torch.optim.Adam(self.model.parameters(), 
                                           lr=lr, 
                                           weight_decay=weight_decay)
         
@@ -112,7 +114,7 @@ class SANExperiment():
         for state in self.optimizer.state.values():
             for k, v in state.items():
                 if isinstance(v, torch.Tensor):
-                    state[k] = v.to(self.model.device)
+                    state[k] = v.to(self.device)
     
     def save(self):
         """Saves the experiment on disk, i.e, create/update the last checkpoint."""
@@ -134,11 +136,10 @@ class SANExperiment():
         
         start_epoch = self.epoch
         print("Start/Continue training from epoch {}".format(start_epoch))
-        
         for epoch in range(start_epoch, self.num_epochs):
             running_loss, running_acc, num_updates = 0.0, 0.0, 0.0
             
-            for i, q, a in self.train_loader:
+            for i, q, a in loader:                
                 if (self.device == 'cuda'):
                     i, q, a = i.cuda(), q.cuda(), a.cuda()
                 
@@ -157,10 +158,12 @@ class SANExperiment():
                 with torch.no_grad():
                     running_loss += loss.item()
                     running_acc += torch.sum((y_pred == class_ind).data)
-                
                 num_updates += 1
                 
-            loss = running_loss / num_updates
+                print("Epoch: {}, Loss = {}".format(epoch, running_loss/(num_updates*self.batch_size)))
+                
+            loss = (running_loss / len(loader.dataset))
+            print("Loss after Epoch {}: {}".format(epoch, loss))
             acc = (running_acc / len(loader.dataset)) * 100
             
             self.history.append(epoch)
@@ -170,6 +173,6 @@ class SANExperiment():
             self.save()
         
         print("Finish training for {} epochs".format(self.num_epochs))
-
-exp = SANExperiment(output_dir="exp")
+        
+exp = SANExperiment(output_dir="exp", train_set=train_set)
 exp.run()

@@ -22,6 +22,8 @@ class VGGNet(nn.Module):
         
         # Linear layer goes from 512 to 1024
         self.classifier = nn.Linear(self.num_fts, self.output_features)
+        nn.init.xavier_uniform_(self.classifier.weight)
+        
         self.tanh = nn.Tanh()
         
     def forward(self, x):         
@@ -44,16 +46,20 @@ class LSTM(nn.Module):
         self.hidden_dim = hidden_dim
         self.embedding_dim = embedding_dim
         
-        self.linear = nn.Linear(vocab_size, embedding_dim, bias=False)
-                
+        self.embed = nn.Embedding(vocab_size, embedding_dim)
+        nn.init.xavier_uniform_(self.embed.weight)
+        
         self.lstm = nn.LSTM(input_size=embedding_dim, hidden_size=hidden_dim, 
                             num_layers=num_layers)
+        nn.init.xavier_uniform_(self.lstm.weight_ih_l0)
+        nn.init.xavier_uniform_(self.lstm.weight_hh_l0)
+
     
-    def forward(self, question_vec):       
-        q = question_vec.transpose(1, 2)
+    def forward(self, question_vec):
+        _, q_ind = torch.max(question_vec, 1)
                 
-        embedding = self.linear(q).transpose(0, 1)
-        
+        embedding = self.embed(q_ind).transpose(0, 1)
+                        
         _, h = self.lstm(embedding)
         
         return h[0][0]
@@ -75,12 +81,20 @@ class AttentionNet(nn.Module):
         self.image1 = nn.Linear(input_features, output_features, bias=False)
         self.question1 = nn.Linear(input_features, output_features)
         self.attention1 = nn.Linear(output_features, 1)
+        nn.init.xavier_uniform_(self.image1.weight)
+        nn.init.xavier_uniform_(self.question1.weight)
+        nn.init.xavier_uniform_(self.attention1.weight)
+
         
         self.image2 = nn.Linear(input_features, output_features, bias=False)
         self.question2 = nn.Linear(input_features, output_features)
         self.attention2 = nn.Linear(output_features, 1)
+        nn.init.xavier_uniform_(self.image2.weight)
+        nn.init.xavier_uniform_(self.question2.weight)
+        nn.init.xavier_uniform_(self.attention2.weight)
         
         self.answer_dist = nn.Linear(input_features, self.num_classes)
+        nn.init.xavier_uniform_(self.answer_dist.weight)
                 
         self.tanh = nn.Tanh()
         self.softmax = nn.Softmax(dim=1)
@@ -93,12 +107,14 @@ class AttentionNet(nn.Module):
         irep_1 = self.image1(image)
         qrep_1 = self.question1(question).unsqueeze(dim=1) 
         ha_1 = self.tanh(irep_1 + qrep_1)
+        ha_1 = self.dropout(ha_1)
         pi_1 = self.softmax(self.attention1(ha_1))
         u_1 = (pi_1 * image).sum(dim=1) + question
         
         irep_2 = self.image2(image)
         qrep_2 = self.question2(u_1).unsqueeze(dim=1)
         ha_2 = self.tanh(irep_2 + qrep_2)
+        ha_2 = self.dropout(ha_2)
         pi_2 = self.softmax(self.attention2(ha_2))
         u_2 = (pi_2 * image).sum(dim=1) + u_1
         
