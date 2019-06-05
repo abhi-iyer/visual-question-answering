@@ -16,30 +16,27 @@ class VGGNet(nn.Module):
             param.requires_grad = fine_tuning
             
         self.features = vgg.features
-        
+        self.transformed_vec_size = 196
         self.num_fts = 512
         self.output_features = output_features
         
         # Linear layer goes from 512 to 1024
-        self.classifier = nn.Linear(self.num_fts, self.output_features)
+        self.classifier = nn.Linear(self.transformed_vec_size, self.output_features)
         nn.init.xavier_uniform_(self.classifier.weight)
         
         self.tanh = nn.Tanh()
         
     def forward(self, x):         
         h = self.features(x)
-        
-        h = h.view(-1, 196, self.num_fts)
-        
+        h = h.view(-1, self.num_fts, self.transformed_vec_size)
         h = self.classifier(h)
-        
         y = self.tanh(h)
         
         return y
     
     
 class LSTM(nn.Module): 
-    def __init__(self, vocab_size, embedding_dim, num_layers=1, batch_size=100, hidden_dim=1024):
+    def __init__(self, vocab_size, embedding_dim, num_layers=1, batch_size=100, hidden_dim=512):
         super(LSTM,self).__init__()
         self.vocab_size = vocab_size
         self.batch_size = batch_size
@@ -59,18 +56,15 @@ class LSTM(nn.Module):
         _, q_ind = torch.max(question_vec, 1)
                 
         embedding = self.embed(q_ind).transpose(0, 1)
-                        
-        _, h = self.lstm(embedding)
         
-        return h[0][0]
+        _, h = self.lstm(embedding)
+            
+        return torch.unsqueeze(h[0][0], 2)
     
 
 class AttentionNet(nn.Module):
     def __init__(self, num_classes, batch_size, input_features=1024, output_features=512):
-        #v_i in dxm => 1024x196 vec
-        #v_q in d => 1024x1 vec
-        #Wia v_i in kxm => kx196
-        #will choose k => 512
+        
         
         super(AttentionNet,self).__init__()
         self.input_features = input_features
@@ -79,7 +73,7 @@ class AttentionNet(nn.Module):
         self.batch_size = batch_size
         
         self.image1 = nn.Linear(input_features, output_features, bias=False)
-        self.question1 = nn.Linear(input_features, output_features)
+        self.question1 = nn.Linear(output_features, output_features)
         self.attention1 = nn.Linear(output_features, 1)
         nn.init.xavier_uniform_(self.image1.weight)
         nn.init.xavier_uniform_(self.question1.weight)
@@ -87,13 +81,14 @@ class AttentionNet(nn.Module):
 
         
         self.image2 = nn.Linear(input_features, output_features, bias=False)
-        self.question2 = nn.Linear(input_features, output_features)
+        self.question2 = nn.Linear(output_features, output_features)
         self.attention2 = nn.Linear(output_features, 1)
+        
         nn.init.xavier_uniform_(self.image2.weight)
         nn.init.xavier_uniform_(self.question2.weight)
         nn.init.xavier_uniform_(self.attention2.weight)
         
-        self.answer_dist = nn.Linear(input_features, self.num_classes)
+        self.answer_dist = nn.Linear(output_features, self.num_classes)
         nn.init.xavier_uniform_(self.answer_dist.weight)
                 
         self.tanh = nn.Tanh()
@@ -103,23 +98,34 @@ class AttentionNet(nn.Module):
     def forward(self, image, question):
         # image_vec = 10x196x1024
         # question_vec = 10x1024
-        
+        #print("image size: " + str(image.shape))
+        #print("question size: " + str(question.shape))
         irep_1 = self.image1(image)
-        qrep_1 = self.question1(question).unsqueeze(dim=1) 
+        #print("irep_1: " + str(irep_1.shape))
+        qrep_1 = self.question1(question.squeeze(2)).unsqueeze(2)
+        #print("qrep_1 " + str(qrep_1.shape))
+        
         ha_1 = self.tanh(irep_1 + qrep_1)
+        #print("self.tanh(irep_1 + qrep_1).shape " + str(ha_1.shape))
         ha_1 = self.dropout(ha_1)
         pi_1 = self.softmax(self.attention1(ha_1))
-        u_1 = (pi_1 * image).sum(dim=1) + question
+        #print("pi_1 shape: " + str(pi_1.shape))
+        x = pi_1 * image
+        #print(" x shape: " + str(x.shape))
+        y = torch.sum(pi_1*image, dim=2).unsqueeze(dim=2)
+        #print(" y shape: " + str(y.shape))
+        u_1 = y + question
+        #print(" u_1: " + str(u_1.shape))
         
         irep_2 = self.image2(image)
-        qrep_2 = self.question2(u_1).unsqueeze(dim=1)
+        qrep_2 = self.question2(u_1.squeeze(2)).unsqueeze(2)
         ha_2 = self.tanh(irep_2 + qrep_2)
         ha_2 = self.dropout(ha_2)
         pi_2 = self.softmax(self.attention2(ha_2))
-        u_2 = (pi_2 * image).sum(dim=1) + u_1
-        
-        w_u = self.answer_dist(self.dropout(u_2))
-
+        u_2 = torch.sum(pi_1*image, dim=2).unsqueeze(dim=2) + u_1
+        #print("u_2: " + str(u_2.shape))
+        w_u = self.answer_dist(self.dropout(u_2.squeeze(dim=2)))
+        #print(w_u.shape)
         return w_u
 
     
