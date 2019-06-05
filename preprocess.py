@@ -162,7 +162,7 @@ class MSCOCODataset(td.Dataset):
         vec = torch.zeros(len(mapping))
                 
         for word in inp.split(" "):
-            vec[mapping[word]] += 1
+            vec[mapping[word]] = 1
                         
         return vec
    

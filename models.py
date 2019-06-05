@@ -118,12 +118,9 @@ class AttentionNet(nn.Module):
         pi_2 = self.softmax(self.attention2(ha_2))
         u_2 = (pi_2 * image).sum(dim=1) + u_1
         
-        w_u = self.answer_dist(u_2)
-        m = w_u.max()
-        
-        p_ans = self.softmax(w_u - m)
-        
-        return p_ans
+        w_u = self.answer_dist(self.dropout(u_2))
+
+        return w_u
 
     
 

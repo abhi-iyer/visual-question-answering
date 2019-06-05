@@ -25,12 +25,13 @@ class SANExperiment():
     def __init__(self, train_set, output_dir, batch_size=10,
                  perform_validation_during_training=False,
                  lr=0.01, weight_decay=0.5,
-                 num_epochs=3):
+                 num_epochs=10):
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
         self.train_set = train_set
         
-        indices = np.random.permutation(int(len(self.train_set) * 0.013))
+        indices = np.random.permutation(int(len(self.train_set) * 0.08))
+                
         train_ind = indices[:int(len(indices)*0.8)]
         val_ind = indices[int(len(indices)*0.8):]
         train_sampler = torch.utils.data.sampler.SubsetRandomSampler(train_ind)
@@ -50,6 +51,8 @@ class SANExperiment():
         self.optimizer = torch.optim.Adam(self.model.parameters(), 
                                           lr=lr, 
                                           weight_decay=weight_decay)
+        
+        self.total_ex = len(train_ind)
         
         self.batch_size = batch_size
         self.num_epochs = num_epochs
@@ -158,13 +161,15 @@ class SANExperiment():
                 with torch.no_grad():
                     running_loss += loss.item()
                     running_acc += torch.sum((y_pred == class_ind).data)
+                        
                 num_updates += 1
                 
-                print("Epoch: {}, Loss = {}".format(epoch, running_loss/(num_updates*self.batch_size)))
+                print("Epoch: {}, Loss = {}".format(epoch, (float(running_loss) / float(num_updates * self.batch_size))))
                 
-            loss = (running_loss / len(loader.dataset))
-            print("Loss after Epoch {}: {}".format(epoch, loss))
-            acc = (running_acc / len(loader.dataset)) * 100
+            loss = (float(running_loss) / float(self.total_ex))
+            acc = (float(running_acc) / float(self.total_ex)) * 100
+            
+            print("Done with Epoch {}. Loss={}, Acc={}".format(epoch, loss, acc))
             
             self.history.append(epoch)
             self.train_loss.append(loss)
