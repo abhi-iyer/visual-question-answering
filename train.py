@@ -9,6 +9,7 @@ from torch.autograd import Variable
 import torchvision as tv
 import nntools as nt
 import torch
+import torch.utils.data as data
 
 from models import *
 from preprocess import *
@@ -19,18 +20,22 @@ ans_dir = '/datasets/ee285f-public/VQA2017/v2_mscoco_'
 
 train_set = MSCOCODataset(images_dir, q_dir, 
                           ans_dir, mode='train', 
-                          image_size=(448, 448))
+                          image_size=(224, 224))
+
+def collate_fn(batch):
+    batch.sort(key=lambda x : x[2], reverse=True)
+    return data.dataloader.default_collate(batch)
 
 class SANExperiment():
-    def __init__(self, train_set, output_dir, batch_size=60,
+    def __init__(self, train_set, output_dir, batch_size=150,
                  perform_validation_during_training=False,
                  lr=0.01, weight_decay=0.5,
-                 num_epochs=1):
+                 num_epochs=10):
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
         self.train_set = train_set
         
-        indices = np.random.permutation(int(len(self.train_set) * 0.213))
+        indices = np.random.permutation(int(len(self.train_set) * 0.27))
                 
         train_ind = indices[:int(len(indices)*0.8)]
         val_ind = indices[int(len(indices)*0.8):]
@@ -39,10 +44,12 @@ class SANExperiment():
 
         self.train_loader = torch.utils.data.DataLoader(self.train_set, batch_size=batch_size, 
                                                         pin_memory=True, 
-                                                        sampler=train_sampler)
+                                                        sampler=train_sampler,
+                                                        collate_fn=collate_fn)
         self.val_loader = torch.utils.data.DataLoader(self.train_set, batch_size=batch_size, 
                                                       pin_memory=True, 
-                                                      sampler=val_sampler)
+                                                      sampler=val_sampler,
+                                                      collate_fn=collate_fn)
         
         self.model = SAN(num_classes=1000, batch_size=batch_size, 
                          vocab_size=len(self.train_set.vocab_q), embedding_dim=1000,
@@ -148,14 +155,12 @@ class SANExperiment():
                     i, q, s, a = i.cuda(), q.cuda(), s.cuda(), a.cuda()
                 
                 i, q, s, a = Variable(i), Variable(q), Variable(s), Variable(a)
-                
+                                
                 self.optimizer.zero_grad()
-                predicted_answer = self.model.forward(i, q, s)
+                predicted_answer = self.model.forward(i, q.long(), s.long())
                 
                 _, y_pred = torch.max(predicted_answer, 1)
-                
-                print(predicted_answer.shape, predicted_answer.dtype)
-                                
+                                                
                 loss = self.criterion(predicted_answer, a.long().squeeze(dim=1))
                 loss.backward()
                 self.optimizer.step()
@@ -171,7 +176,7 @@ class SANExperiment():
                                                               (float(running_acc) / float(num_updates * self.batch_size))))
                 
             loss = (float(running_loss) / float(self.total_ex))
-            acc = (float(running_acc) / float(self.total_ex)) * 100
+            acc = (float(running_acc) / float(self.total_ex))
             
             print("Done with Epoch {}. Loss={}, Acc={}".format(epoch, loss, acc))
             
@@ -183,6 +188,5 @@ class SANExperiment():
         
         print("Finish training for {} epochs".format(self.num_epochs))
         
-
 exp = SANExperiment(output_dir="exp", train_set=train_set)
 exp.run()

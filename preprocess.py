@@ -94,7 +94,7 @@ def myimshow(image, ax=plt):
     return h
 
 class MSCOCODataset(td.Dataset):
-    def __init__(self, images_dir, q_dir, ans_dir, mode='train', image_size=(448, 448), top_num=1000):
+    def __init__(self, images_dir, q_dir, ans_dir, mode='train', image_size=(224, 224), top_num=1000):
         super(MSCOCODataset, self).__init__()
         self.mode = mode
         self.image_size = image_size
@@ -150,7 +150,7 @@ class MSCOCODataset(td.Dataset):
         self.vocab_q['#'] = 0 # add padding
         
         self.seq_question = max([len(x.split(" ")) for x in self.top_questions])
-                
+        
     
     def __len__(self):
         return len(self.top_questions)
@@ -180,7 +180,7 @@ class MSCOCODataset(td.Dataset):
         
         img = Image.open(img_path).convert("RGB")
         
-        transform = tv.transforms.Compose([tv.transforms.Resize(self.image_size),
+        transform = tv.transforms.Compose([tv.transforms.CenterCrop(self.image_size),
                                            tv.transforms.ToTensor(),
                                            tv.transforms.Normalize((0.5, 0.5, 0.5),
                                                                    (0.5, 0.5, 0.5))])
