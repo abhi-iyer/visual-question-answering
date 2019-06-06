@@ -43,7 +43,7 @@ class LSTM(nn.Module):
         self.hidden_dim = hidden_dim
         self.embedding_dim = embedding_dim
         
-        self.embed = nn.Embedding(vocab_size, embedding_dim)
+        self.embed = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
         nn.init.xavier_uniform_(self.embed.weight)
         
         self.lstm = nn.LSTM(input_size=embedding_dim, hidden_size=hidden_dim, 
@@ -52,11 +52,15 @@ class LSTM(nn.Module):
         nn.init.xavier_uniform_(self.lstm.weight_hh_l0)
 
     
-    def forward(self, question_vec):
-        _, q_ind = torch.max(question_vec, 1)
+    def forward(self, q_ind, seq_length):
+        #_, q_ind = torch.max(question_vec, 1)
                 
-        embedding = self.embed(q_ind).transpose(0, 1)
+        embedding = self.embed(q_ind.long()).transpose(0, 1)
         
+        #print(embedding.shape)
+        
+        #embedding = nn.utils.rnn.pack_padded_sequence(embedding, seq_length, batch_first=True)
+                                                      
         _, h = self.lstm(embedding)
             
         return torch.unsqueeze(h[0][0], 2)
@@ -64,8 +68,6 @@ class LSTM(nn.Module):
 
 class AttentionNet(nn.Module):
     def __init__(self, num_classes, batch_size, input_features=1024, output_features=512):
-        
-        
         super(AttentionNet,self).__init__()
         self.input_features = input_features
         self.output_features = output_features #k 
@@ -125,6 +127,7 @@ class AttentionNet(nn.Module):
         u_2 = torch.sum(pi_1*image, dim=2).unsqueeze(dim=2) + u_1
         #print("u_2: " + str(u_2.shape))
         w_u = self.answer_dist(self.dropout(u_2.squeeze(dim=2)))
+        
         #print(w_u.shape)
         return w_u
 
@@ -145,12 +148,12 @@ class SAN(nn.Module):
         self.attention = AttentionNet(num_classes=num_classes, batch_size=batch_size, 
                                       input_features=input_attention, output_features=output_attention)
         
-    def forward(self, image, question):
+    def forward(self, image, question, seq_length):
         #image_embedding -> 1024x196
         image_embedding = self.vgg(image)
         
         #question_embedding -> 1024x1 
-        question_embedding = self.lstm(question)
+        question_embedding = self.lstm(question, seq_length)
         
         #should return answer distribution 1000x1 
         return self.attention(image_embedding, question_embedding)

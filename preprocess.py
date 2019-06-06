@@ -121,8 +121,9 @@ class MSCOCODataset(td.Dataset):
             
             self.answers.append(processed)
             
-            for each in processed.split(" "):
-                self.vocab_a[each] += 1
+            if (len(processed.split(" ")) == 1):
+                for each in processed.split(" "):
+                    self.vocab_a[each] += 1
         
         self.vocab_a = sorted(self.vocab_a.items(), key=lambda x : x[1], reverse=True)
         self.vocab_a = {self.vocab_a[i][0] : i for i in range(top_num)}
@@ -133,11 +134,10 @@ class MSCOCODataset(td.Dataset):
         self.top_images = []
         
         for i, each in enumerate(self.answers):
-            if all(word in self.vocab_a for word in each.split(" ")):
+            if all(word in self.vocab_a for word in each.split(" ")) and (len(each.split(" ")) == 1):
                 self.top_answers.append(each)
                 self.top_questions.append(process_sentence(self.q_json[i]['question']))
                 self.top_images.append(str(self.q_json[i]['image_id']))
-        
         
         
         # question parsing
@@ -146,9 +146,10 @@ class MSCOCODataset(td.Dataset):
         for q in self.top_questions:
             for each in q.split(" "):
                 self.vocab_q.add(each)
-        self.vocab_q = {word : i for i, word in enumerate(self.vocab_q)}
+        self.vocab_q = {word : i+1 for i, word in enumerate(self.vocab_q)}
+        self.vocab_q['#'] = 0 # add padding
         
-        self.seq_length = max([len(x.split(" ")) for x in self.top_questions])
+        self.seq_question = max([len(x.split(" ")) for x in self.top_questions])
                 
     
     def __len__(self):
@@ -159,18 +160,13 @@ class MSCOCODataset(td.Dataset):
                 format(self.mode, self.image_size)
 
     def one_hot_answer(self, inp, mapping):
-        vec = torch.zeros(len(mapping))
-                
-        for word in inp.split(" "):
-            vec[mapping[word]] = 1
-                        
-        return vec
+        return torch.Tensor([mapping[inp]])
    
     def one_hot_question(self, inp, mapping):
-        vec = torch.zeros(len(mapping), len(inp.split(" ")))
+        vec = torch.zeros(len(inp.split(" ")))
         
         for i, word in enumerate(inp.split(" ")):
-            vec[mapping[word], i] = 1
+            vec[i] = mapping[word]
         
         return vec
         
@@ -193,8 +189,7 @@ class MSCOCODataset(td.Dataset):
         one_hot_q = self.one_hot_question(q, self.vocab_q)
         one_hot_ans = self.one_hot_answer(a, self.vocab_a)
         
-        target_q = torch.zeros(len(self.vocab_q), self.seq_length)
-        target_q[:, :one_hot_q.shape[1]] = one_hot_q
-
+        target_q = torch.zeros(self.seq_question)
+        target_q[:one_hot_q.shape[0]] = one_hot_q
         
-        return x, target_q, one_hot_ans
+        return x, target_q, len(one_hot_q), one_hot_ans
