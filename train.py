@@ -26,8 +26,9 @@ def collate_fn(batch):
     batch.sort(key=lambda x : x[2], reverse=True)
     return data.dataloader.default_collate(batch)
 
+
 class SANExperiment():
-    def __init__(self, train_set, output_dir, batch_size=150,
+    def __init__(self, train_set, output_dir, batch_size=250,
                  perform_validation_during_training=False,
                  lr=0.01, weight_decay=0.5,
                  num_epochs=10):
@@ -35,7 +36,7 @@ class SANExperiment():
         
         self.train_set = train_set
         
-        indices = np.random.permutation(int(len(self.train_set) * 0.27))
+        indices = np.random.permutation(int(len(self.train_set) * 0.34))
                 
         train_ind = indices[:int(len(indices)*0.8)]
         val_ind = indices[int(len(indices)*0.8):]
@@ -52,13 +53,12 @@ class SANExperiment():
                                                       collate_fn=collate_fn)
         
         self.model = SAN(num_classes=1000, batch_size=batch_size, 
-                         vocab_size=len(self.train_set.vocab_q), embedding_dim=1000,
+                         vocab_size=len(self.train_set.vocab_q), embedding_dim=500,
                          output_vgg=1024, input_attention=1024, output_attention=512).to(self.device)
         self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.SGD(self.model.parameters(), 
+        self.optimizer = torch.optim.Adam(self.model.parameters(), 
                                          lr=lr, 
-                                         weight_decay=weight_decay,
-                                         momentum=0.9)
+                                         weight_decay=weight_decay)
         
         self.total_ex = len(train_ind)
         
@@ -139,6 +139,33 @@ class SANExperiment():
                                 map_location=self.device)
         self.load_state_dict(checkpoint)
         del checkpoint
+        
+    def evaluate(self):
+        self.model.eval()
+        
+        loader = self.val_loader
+        
+        loss, acc = 0.0, 0.0
+        
+        with torch.no_grad(): 
+            for i, q, s, a in loader:
+                if (self.device == 'cuda'):
+                    i, q, s, a = i.cuda(), q.cuda(), s.cuda(), a.cuda()
+
+                i, q, s, a = Variable(i), Variable(q), Variable(s), Variable(a)
+
+                predicted_answer = self.model.forward(i, q.long(), s.long())
+                _, y_pred = torch.max(predicted_answer, 1)
+
+                loss += self.criterion(predicted_answer, a.long().squeeze(dim=1)).item()
+                acc += torch.sum((y_pred == a.long()).data)
+        
+        loss = (float(loss) / float(len(self.val_ind)))
+        acc = (float(acc) / float(len(self.val_ind)))
+        
+        print("Validation Loss:", loss)
+        print("Validation Accuracy:", acc)
+            
     
     def run(self):
         self.model.train()
@@ -149,6 +176,7 @@ class SANExperiment():
         print("Start/Continue training from epoch {}".format(start_epoch))
         for epoch in range(start_epoch, self.num_epochs):
             running_loss, running_acc, num_updates = 0.0, 0.0, 0.0
+            counter = 0
             
             for i, q, s, a in loader:                
                 if (self.device == 'cuda'):
@@ -168,13 +196,25 @@ class SANExperiment():
                 with torch.no_grad():
                     running_loss += loss.item()
                     running_acc += torch.sum((y_pred == a.long()).data)
-                        
+                    
                 num_updates += 1
                 
                 print("Epoch: {}, Loss = {}, Acc = {}".format(epoch, 
                                                               (float(running_loss) / float(num_updates * self.batch_size)),
                                                               (float(running_acc) / float(num_updates * self.batch_size))))
                 
+                if (counter % 100 == 0):
+                    loss = (float(running_loss) / float(num_updates * self.batch_size))
+                    acc = (float(running_acc) / float(num_updates * self.batch_size))
+                    
+                    self.history.append(epoch)
+                    self.train_loss.append(loss)
+                    self.train_acc.append(acc)
+                    
+                    self.save()
+                
+                counter += 1
+            
             loss = (float(running_loss) / float(self.total_ex))
             acc = (float(running_acc) / float(self.total_ex))
             
@@ -186,7 +226,8 @@ class SANExperiment():
             
             self.save()
         
-        print("Finish training for {} epochs".format(self.num_epochs))
-        
-exp = SANExperiment(output_dir="exp", train_set=train_set)
+        print("Finish training for {} epochs".format(self.num_epochs)) 
+
+exp = SANExperiment(output_dir="exp_batch250", train_set=train_set)
 exp.run()
+exp.evaluate()
