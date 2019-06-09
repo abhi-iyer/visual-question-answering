@@ -13,4 +13,4 @@ logs_batch200 and exp_batch200 are the logs and checkpoint files to load and run
 
 logs_batch150 and logs_batch250 describe 2 different experiments run with Adam. exp_batch250 is the checkpoint file for the experiment corresponding to logs_batch250. Both experiments are highly prone to overfitting, and do not contain proper parameter weight initializations.
 
-
+Code written in PyTorch.
