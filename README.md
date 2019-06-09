@@ -1,4 +1,4 @@
-# Visual Question Answering (VQA) with Stacked Attention Networks
+# Visual Question Answering (VQA) with Stacked Attention Networks (CNN, LSTM, and Attention Nets)
 ### Abhiram Iyer, Aravind Mahadevan, Neil Sengupta
 #### UC San Diego
 
