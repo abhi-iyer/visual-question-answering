@@ -27,10 +27,7 @@ def collate_fn(batch):
     return data.dataloader.default_collate(batch)
 
 class SANExperiment():
-    def __init__(self, train_set, output_dir, batch_size=200,
-                 perform_validation_during_training=False,
-                 lr=0.01, weight_decay=0.5,
-                 num_epochs=10):
+    def __init__(self, train_set, output_dir, batch_size=200, num_epochs=10):
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
         self.train_set = train_set
@@ -38,7 +35,7 @@ class SANExperiment():
         torch.backends.cudnn.benchmark = False
         
         self.indices = np.random.permutation(len(self.train_set))
-        self.indices = self.indices[:int(len(self.indices)*0.2)]
+        self.indices = self.indices[:int(len(self.indices)*0.5)]
                 
         train_ind = self.indices[:int(len(self.indices)*0.8)]
         val_ind = self.indices[int(len(self.indices)*0.8):]
@@ -125,7 +122,8 @@ class SANExperiment():
                 'Optimizer': self.optimizer.state_dict(),
                 'History': self.history,
                 'TrainLoss' : self.train_loss,
-                'TrainAcc' : self.train_acc}
+                'TrainAcc' : self.train_acc,
+                'Indices' : self.train_ind}
     
     def load_state_dict(self, checkpoint):
         self.image_model.load_state_dict(checkpoint['ImageModel'])
@@ -135,6 +133,7 @@ class SANExperiment():
         self.history = checkpoint['History']
         self.train_loss = checkpoint['TrainLoss']
         self.train_acc = checkpoint['TrainAcc']
+        self.train_ind = checkpoint['Indices']
         
         for state in self.optimizer.state.values():
             for k, v in state.items():
@@ -159,7 +158,7 @@ class SANExperiment():
         self.question_model.eval()
         self.attention.eval()
         
-        loader = self.train_loader
+        loader = self.val_loader
         
         loss, acc = 0.0, 0.0
         
@@ -192,11 +191,13 @@ class SANExperiment():
         self.attention.train()
         
         loader = self.train_loader
-        
+                
         start_epoch = self.epoch
         print("Start/Continue training from epoch {}".format(start_epoch))
         for epoch in range(start_epoch, self.num_epochs):
             running_loss, running_acc, num_updates = 0.0, 0.0, 0.0
+            
+            counter = 0
             
             for i, q, s, a in loader:                
                 if (self.device == 'cuda'):
@@ -230,11 +231,19 @@ class SANExperiment():
                     
                 num_updates += 1
                 
-                print("Epoch: {}, Loss = {}, Acc = {}".format(epoch, 
+                print("Epoch: {}, Batch: {}, Loss = {}, Acc = {}".format(epoch, counter, 
                                                               (float(running_loss) / float(num_updates * self.batch_size)),
                                                               (float(running_acc) / float(num_updates * self.batch_size))))
                 
                 torch.cuda.empty_cache()
+                
+                if (counter % 50 == 0):
+                    self.history.append(epoch)
+                    self.train_loss.append(float(running_loss) / float(num_updates * self.batch_size))
+                    self.train_acc.append(float(running_acc) / float(num_updates * self.batch_size))
+                    self.save()
+                
+                counter += 1
             
             loss = (float(running_loss) / float(self.total_ex))
             acc = (float(running_acc) / float(self.total_ex))
