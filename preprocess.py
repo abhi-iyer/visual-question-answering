@@ -94,7 +94,7 @@ def myimshow(image, ax=plt):
     return h
 
 class MSCOCODataset(td.Dataset):
-    def __init__(self, images_dir, q_dir, ans_dir, mode='train', image_size=(224, 224), top_num=2):
+    def __init__(self, images_dir, q_dir, ans_dir, mode='train', image_size=(448, 448), top_num=1000):
         super(MSCOCODataset, self).__init__()
         self.mode = mode
         self.image_size = image_size
@@ -121,12 +121,11 @@ class MSCOCODataset(td.Dataset):
             
             self.answers.append(processed)
             
-            if len(processed.split(" ")) == 1 and (processed == 'yes' or processed == 'no'):
-                for each in processed.split(" "):
-                    self.vocab_a[each] += 1
+            if len(processed.split(" ")) == 1:
+                self.vocab_a[processed] += 1
         
         self.vocab_a = sorted(self.vocab_a.items(), key=lambda x : x[1], reverse=True)
-        print(self.vocab_a)
+        print(len(self.vocab_a))
         self.vocab_a = {self.vocab_a[i][0] : i for i in range(top_num)}
         
         
@@ -135,8 +134,7 @@ class MSCOCODataset(td.Dataset):
         self.top_images = []
         
         for i, each in enumerate(self.answers):
-            if all(word in self.vocab_a for word in each.split(" ")) and (len(each.split(" ")) == 1) \
-                   and (each == 'yes' or each == 'no'):
+            if all(word in self.vocab_a for word in each.split(" ")) and (len(each.split(" ")) == 1):
                 self.top_answers.append(each)
                 self.top_questions.append(process_sentence(self.q_json[i]['question']))
                 self.top_images.append(str(self.q_json[i]['image_id']))

@@ -39,7 +39,7 @@ class VGGNet(nn.Module):
     
     
 class LSTM(nn.Module): 
-    def __init__(self, vocab_size, embedding_dim, num_layers=1, batch_size=100, hidden_dim=1024):
+    def __init__(self, vocab_size, embedding_dim, batch_size, hidden_dim, num_layers=1):
         super(LSTM,self).__init__()
         self.vocab_size = vocab_size
         self.batch_size = batch_size
@@ -51,9 +51,14 @@ class LSTM(nn.Module):
         
         self.lstm = nn.LSTM(input_size=embedding_dim, hidden_size=hidden_dim, 
                             num_layers=num_layers)
-        nn.init.xavier_uniform_(self.lstm.weight_ih_l0)
-        nn.init.xavier_uniform_(self.lstm.weight_hh_l0)
-
+        self.init_lstm(self.lstm.weight_ih_l0)
+        self.init_lstm(self.lstm.weight_hh_l0)
+        self.lstm.bias_ih_l0.data.zero_()
+        self.lstm.bias_hh_l0.data.zero_()
+        
+    def init_lstm(self, weight):
+        for w in weight.chunk(4, 0):
+            nn.init.xavier_uniform_(w)
     
     def forward(self, q_ind, seq_length):
         embedding = self.embed(q_ind)
@@ -121,30 +126,3 @@ class AttentionNet(nn.Module):
         w_u = self.answer_dist(self.dropout(u_2))
 
         return w_u
-
-    
-
-class SAN(nn.Module):
-    def __init__(self, output_vgg, vocab_size, batch_size, embedding_dim, num_classes, 
-                 input_attention, output_attention, fine_tuning=False):
-        super(SAN, self).__init__()
-        #output_featured -> 1024
-        self.vgg = VGGNet(output_vgg)
-        
-        #vocab_size,embedding_dim =1000
-        self.lstm = LSTM(vocab_size=vocab_size, embedding_dim=embedding_dim, 
-                         batch_size=batch_size)
-        
-        #num_classes = 10000
-        self.attention = AttentionNet(num_classes=num_classes, batch_size=batch_size, 
-                                      input_features=input_attention, output_features=output_attention)
-        
-    def forward(self, image, question, seq_length):
-        #image_embedding -> 1024x196
-        image_embedding = self.vgg(image)
-        
-        #question_embedding -> 1024x1 
-        question_embedding = self.lstm(question, seq_length)
-        
-        #should return answer distribution 1000x1 
-        return self.attention(image_embedding, question_embedding)

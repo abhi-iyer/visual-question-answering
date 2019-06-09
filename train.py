@@ -26,9 +26,8 @@ def collate_fn(batch):
     batch.sort(key=lambda x : x[2], reverse=True)
     return data.dataloader.default_collate(batch)
 
-
 class SANExperiment():
-    def __init__(self, train_set, output_dir, batch_size=250,
+    def __init__(self, train_set, output_dir, batch_size=200,
                  perform_validation_during_training=False,
                  lr=0.01, weight_decay=0.5,
                  num_epochs=10):
@@ -36,29 +35,38 @@ class SANExperiment():
         
         self.train_set = train_set
         
-        indices = np.random.permutation(int(len(self.train_set) * 0.34))
+        torch.backends.cudnn.benchmark = False
+        
+        self.indices = np.random.permutation(len(self.train_set))
+        self.indices = self.indices[:int(len(self.indices)*0.2)]
                 
-        train_ind = indices[:int(len(indices)*0.8)]
-        val_ind = indices[int(len(indices)*0.8):]
+        train_ind = self.indices[:int(len(self.indices)*0.8)]
+        val_ind = self.indices[int(len(self.indices)*0.8):]
         train_sampler = torch.utils.data.sampler.SubsetRandomSampler(train_ind)
         val_sampler = torch.utils.data.sampler.SubsetRandomSampler(val_ind)
 
         self.train_loader = torch.utils.data.DataLoader(self.train_set, batch_size=batch_size, 
-                                                        pin_memory=True, 
                                                         sampler=train_sampler,
                                                         collate_fn=collate_fn)
         self.val_loader = torch.utils.data.DataLoader(self.train_set, batch_size=batch_size, 
-                                                      pin_memory=True, 
                                                       sampler=val_sampler,
                                                       collate_fn=collate_fn)
         
-        self.model = SAN(num_classes=1000, batch_size=batch_size, 
-                         vocab_size=len(self.train_set.vocab_q), embedding_dim=500,
-                         output_vgg=1024, input_attention=1024, output_attention=512).to(self.device)
+        
+        self.image_model = VGGNet(output_features=1024).to(self.device)
+        self.question_model = LSTM(vocab_size=len(self.train_set.vocab_q), embedding_dim=1000,
+                                   batch_size=batch_size, hidden_dim=1024).to(self.device)
+        self.attention = AttentionNet(num_classes=1000, batch_size=batch_size,
+                                      input_features=1024, output_features=512).to(self.device)
+        
+        self.optimizer_parameter_group = [{'params': self.question_model.parameters()}, 
+                                          {'params': self.image_model.parameters()},
+                                          {'params': self.attention.parameters()}]
+
         self.criterion = nn.CrossEntropyLoss()
-        self.optimizer = torch.optim.Adam(self.model.parameters(), 
-                                         lr=lr, 
-                                         weight_decay=weight_decay)
+        
+        self.optimizer = torch.optim.RMSprop(self.optimizer_parameter_group,
+                                             lr=4e-4, alpha=0.99, eps=1e-8, momentum=0.9)
         
         self.total_ex = len(train_ind)
         
@@ -92,7 +100,9 @@ class SANExperiment():
         return len(self.history)
 
     def setting(self):
-        return {'Net': self.model,
+        return {'ImageModel': self.image_model,
+                'QuestionModel' : self.question_model,
+                'AttentionModel' : self.attention,
                 'Train Set': self.train_set,
                 'Optimizer': self.optimizer,
                 'BatchSize': self.batch_size}
@@ -109,14 +119,18 @@ class SANExperiment():
     
     def state_dict(self):
         """Returns the current state of the experiment."""
-        return {'Net': self.model.state_dict(),
+        return {'ImageModel': self.image_model.state_dict(),
+                'QuestionModel' : self.question_model.state_dict(),
+                'AttentionModel' : self.attention.state_dict(),
                 'Optimizer': self.optimizer.state_dict(),
                 'History': self.history,
                 'TrainLoss' : self.train_loss,
                 'TrainAcc' : self.train_acc}
     
     def load_state_dict(self, checkpoint):
-        self.model.load_state_dict(checkpoint['Net'])
+        self.image_model.load_state_dict(checkpoint['ImageModel'])
+        self.question_model.load_state_dict(checkpoint['QuestionModel'])
+        self.attention.load_state_dict(checkpoint['AttentionModel'])
         self.optimizer.load_state_dict(checkpoint['Optimizer'])
         self.history = checkpoint['History']
         self.train_loss = checkpoint['TrainLoss']
@@ -141,9 +155,11 @@ class SANExperiment():
         del checkpoint
         
     def evaluate(self):
-        self.model.eval()
+        self.image_model.eval()
+        self.question_model.eval()
+        self.attention.eval()
         
-        loader = self.val_loader
+        loader = self.train_loader
         
         loss, acc = 0.0, 0.0
         
@@ -152,12 +168,15 @@ class SANExperiment():
                 if (self.device == 'cuda'):
                     i, q, s, a = i.cuda(), q.cuda(), s.cuda(), a.cuda()
 
-                i, q, s, a = Variable(i), Variable(q), Variable(s), Variable(a)
+                i, q, s, a = Variable(i), Variable(q), Variable(s), Variable(a, required_grad=False)
+                
+                image_embed = self.image_model(i)
+                question_embed = self.question_model(q.long(), s.long())
+                output = self.attention(image_embed, question_embed)
+                
+                _, y_pred = torch.max(output, 1)
 
-                predicted_answer = self.model.forward(i, q.long(), s.long())
-                _, y_pred = torch.max(predicted_answer, 1)
-
-                loss += self.criterion(predicted_answer, a.long().squeeze(dim=1)).item()
+                loss += self.criterion(output, a.long().squeeze(dim=1)).item()
                 acc += torch.sum((y_pred == a.long()).data)
         
         loss = (float(loss) / float(len(self.val_ind)))
@@ -168,7 +187,9 @@ class SANExperiment():
             
     
     def run(self):
-        self.model.train()
+        self.image_model.train()
+        self.question_model.train()
+        self.attention.train()
         
         loader = self.train_loader
         
@@ -176,20 +197,30 @@ class SANExperiment():
         print("Start/Continue training from epoch {}".format(start_epoch))
         for epoch in range(start_epoch, self.num_epochs):
             running_loss, running_acc, num_updates = 0.0, 0.0, 0.0
-            counter = 0
             
             for i, q, s, a in loader:                
                 if (self.device == 'cuda'):
                     i, q, s, a = i.cuda(), q.cuda(), s.cuda(), a.cuda()
-                
+                        
                 i, q, s, a = Variable(i), Variable(q), Variable(s), Variable(a)
                                 
                 self.optimizer.zero_grad()
-                predicted_answer = self.model.forward(i, q.long(), s.long())
+                                
+                image_embed = self.image_model(i)
+                question_embed = self.question_model(q.long(), s.long())
+                output = self.attention(image_embed, question_embed)
                 
-                _, y_pred = torch.max(predicted_answer, 1)
+                _, y_pred = torch.max(output, 1)
                                                 
-                loss = self.criterion(predicted_answer, a.long().squeeze(dim=1))
+                try:
+                    loss = self.criterion(output, a.long().squeeze(dim=1))
+                except RuntimeError as e:
+                    if 'out of memory' in str(e):
+                        if hasattr(torch.cuda, 'emtpy_cache'):
+                            torch.cuda.empty_cache()
+                    else:
+                        raise e
+                        
                 loss.backward()
                 self.optimizer.step()
                 
@@ -203,17 +234,7 @@ class SANExperiment():
                                                               (float(running_loss) / float(num_updates * self.batch_size)),
                                                               (float(running_acc) / float(num_updates * self.batch_size))))
                 
-                if (counter % 100 == 0):
-                    loss = (float(running_loss) / float(num_updates * self.batch_size))
-                    acc = (float(running_acc) / float(num_updates * self.batch_size))
-                    
-                    self.history.append(epoch)
-                    self.train_loss.append(loss)
-                    self.train_acc.append(acc)
-                    
-                    self.save()
-                
-                counter += 1
+                torch.cuda.empty_cache()
             
             loss = (float(running_loss) / float(self.total_ex))
             acc = (float(running_acc) / float(self.total_ex))
@@ -227,7 +248,6 @@ class SANExperiment():
             self.save()
         
         print("Finish training for {} epochs".format(self.num_epochs)) 
-
-exp = SANExperiment(output_dir="exp_batch250", train_set=train_set)
+        
+exp = SANExperiment(output_dir="exp_batch200", train_set=train_set)
 exp.run()
-exp.evaluate()
