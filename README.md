@@ -1,6 +1,6 @@
-## Visual Question Answering (VQA) with Stacked Attention Networks
-Abhiram Iyer, Aravind Mahadevan, Neil Sengupta
-UC San Diego
+# Visual Question Answering (VQA) with Stacked Attention Networks
+### Abhiram Iyer, Aravind Mahadevan, Neil Sengupta
+#### UC San Diego
 
 Based off of the paper here: https://arxiv.org/pdf/1511.02274.pdf
 
