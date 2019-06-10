@@ -18,7 +18,7 @@ from nltk.stem.porter import *
 import string
 from nltk.tokenize import word_tokenize
 
-#entire cell uses code found: https://github.com/zcyang/imageqa-san/blob/master/data_vqa/process_function.py
+#preprocessing uses code found: https://github.com/zcyang/imageqa-san/blob/master/data_vqa/process_function.py
 def process_sentence(sentence):
     periodStrip  = re.compile("(?!<=\d)(\.)(?!\d)")
     commaStrip   = re.compile("(\d)(\,)(\d)")
@@ -93,6 +93,7 @@ def myimshow(image, ax=plt):
     ax.axis('off')
     return h
 
+# custom torch Dataset
 class MSCOCODataset(td.Dataset):
     def __init__(self, images_dir, q_dir, ans_dir, mode='train', image_size=(448, 448), top_num=1000):
         super(MSCOCODataset, self).__init__()
@@ -180,6 +181,7 @@ class MSCOCODataset(td.Dataset):
         
         img = Image.open(img_path).convert("RGB")
         
+        # normalize each image
         transform = tv.transforms.Compose([tv.transforms.CenterCrop(self.image_size),
                                            tv.transforms.ToTensor(),
                                            tv.transforms.Normalize((0.5, 0.5, 0.5),

@@ -51,12 +51,15 @@ class LSTM(nn.Module):
         
         self.lstm = nn.LSTM(input_size=embedding_dim, hidden_size=hidden_dim, 
                             num_layers=num_layers)
+        # init LSTM
         self.init_lstm(self.lstm.weight_ih_l0)
         self.init_lstm(self.lstm.weight_hh_l0)
         self.lstm.bias_ih_l0.data.zero_()
         self.lstm.bias_hh_l0.data.zero_()
         
     def init_lstm(self, weight):
+        # init LSTM in chunks of 4 cells
+        
         for w in weight.chunk(4, 0):
             nn.init.xavier_uniform_(w)
     
@@ -72,10 +75,10 @@ class LSTM(nn.Module):
 
 class AttentionNet(nn.Module):
     def __init__(self, num_classes, batch_size, input_features=1024, output_features=512):
-        #v_i in dxm => 1024x196 vec
-        #v_q in d => 1024x1 vec
-        #Wia v_i in kxm => kx196
-        #will choose k => 512
+        # v_i in dxm => 1024x196 vec
+        # v_q in d => 1024x1 vec
+        # Wia v_i in kxm => kx196
+        # will choose k => 512
         
         super(AttentionNet,self).__init__()
         self.input_features = input_features
@@ -106,8 +109,8 @@ class AttentionNet(nn.Module):
         self.dropout = nn.Dropout(0.5)
         
     def forward(self, image, question):
-        # image_vec = 10x196x1024
-        # question_vec = 10x1024
+        # image_vec = batchx196x1024
+        # question_vec = batchx1024
         
         irep_1 = self.image1(image)
         qrep_1 = self.question1(question).unsqueeze(dim=1) 

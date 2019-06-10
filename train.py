@@ -23,20 +23,24 @@ train_set = MSCOCODataset(images_dir, q_dir,
                           image_size=(224, 224))
 
 def collate_fn(batch):
+    # function to sort each batch from largest question sequence to smallest (needed for LSTM)
+    
     batch.sort(key=lambda x : x[2], reverse=True)
     return data.dataloader.default_collate(batch)
 
 class SANExperiment():
-    def __init__(self, train_set, output_dir, batch_size=200, num_epochs=10):
+    def __init__(self, train_set, output_dir, batch_size=200, num_epochs=10, early_stopping=False):
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
         self.train_set = train_set
+        self.early_stopping = early_stopping
         
         torch.backends.cudnn.benchmark = False
         
         self.indices = np.random.permutation(len(self.train_set))
         self.indices = self.indices[:int(len(self.indices)*0.5)]
                 
+        # train and validation splits
         train_ind = self.indices[:int(len(self.indices)*0.8)]
         val_ind = self.indices[int(len(self.indices)*0.8):]
         train_sampler = torch.utils.data.sampler.SubsetRandomSampler(train_ind)
@@ -49,7 +53,7 @@ class SANExperiment():
                                                       sampler=val_sampler,
                                                       collate_fn=collate_fn)
         
-        
+        # init model
         self.image_model = VGGNet(output_features=1024).to(self.device)
         self.question_model = LSTM(vocab_size=len(self.train_set.vocab_q), embedding_dim=1000,
                                    batch_size=batch_size, hidden_dim=1024).to(self.device)
@@ -59,7 +63,8 @@ class SANExperiment():
         self.optimizer_parameter_group = [{'params': self.question_model.parameters()}, 
                                           {'params': self.image_model.parameters()},
                                           {'params': self.attention.parameters()}]
-
+        
+        # loss function and optimizer
         self.criterion = nn.CrossEntropyLoss()
         
         self.optimizer = torch.optim.RMSprop(self.optimizer_parameter_group,
@@ -126,6 +131,7 @@ class SANExperiment():
                 'Indices' : self.train_ind}
     
     def load_state_dict(self, checkpoint):
+        # load from pickled checkpoint
         self.image_model.load_state_dict(checkpoint['ImageModel'])
         self.question_model.load_state_dict(checkpoint['QuestionModel'])
         self.attention.load_state_dict(checkpoint['AttentionModel'])
@@ -169,12 +175,14 @@ class SANExperiment():
 
                 i, q, s, a = Variable(i), Variable(q), Variable(s), Variable(a, required_grad=False)
                 
+                # forward prop validation image/question through model
                 image_embed = self.image_model(i)
                 question_embed = self.question_model(q.long(), s.long())
                 output = self.attention(image_embed, question_embed)
                 
                 _, y_pred = torch.max(output, 1)
-
+                
+                # calculate loss
                 loss += self.criterion(output, a.long().squeeze(dim=1)).item()
                 acc += torch.sum((y_pred == a.long()).data)
         
@@ -193,6 +201,8 @@ class SANExperiment():
         loader = self.train_loader
                 
         start_epoch = self.epoch
+        prev_acc = 0
+        
         print("Start/Continue training from epoch {}".format(start_epoch))
         for epoch in range(start_epoch, self.num_epochs):
             running_loss, running_acc, num_updates = 0.0, 0.0, 0.0
@@ -206,7 +216,8 @@ class SANExperiment():
                 i, q, s, a = Variable(i), Variable(q), Variable(s), Variable(a)
                                 
                 self.optimizer.zero_grad()
-                                
+                        
+                # forward prop
                 image_embed = self.image_model(i)
                 question_embed = self.question_model(q.long(), s.long())
                 output = self.attention(image_embed, question_embed)
@@ -214,6 +225,7 @@ class SANExperiment():
                 _, y_pred = torch.max(output, 1)
                                                 
                 try:
+                    # calculate loss
                     loss = self.criterion(output, a.long().squeeze(dim=1))
                 except RuntimeError as e:
                     if 'out of memory' in str(e):
@@ -221,7 +233,8 @@ class SANExperiment():
                             torch.cuda.empty_cache()
                     else:
                         raise e
-                        
+                
+                # backprop
                 loss.backward()
                 self.optimizer.step()
                 
@@ -238,9 +251,18 @@ class SANExperiment():
                 torch.cuda.empty_cache()
                 
                 if (counter % 50 == 0):
+                    acc = float(running_acc) / float(num_updates * self.batch_size)
                     self.history.append(epoch)
                     self.train_loss.append(float(running_loss) / float(num_updates * self.batch_size))
-                    self.train_acc.append(float(running_acc) / float(num_updates * self.batch_size))
+                    self.train_acc.append(acc)
+                    
+                    # early stopping code, stop when validation accuracy drops
+                    if (self.early_stopping):
+                        if prev_acc > acc:
+                            return 0
+                        else:
+                            prev_acc = acc
+                        
                     self.save()
                 
                 counter += 1
