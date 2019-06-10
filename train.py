@@ -191,6 +191,8 @@ class SANExperiment():
         
         print("Validation Loss:", loss)
         print("Validation Accuracy:", acc)
+        
+        return acc
             
     
     def run(self):
@@ -258,10 +260,12 @@ class SANExperiment():
                     
                     # early stopping code, stop when validation accuracy drops
                     if (self.early_stopping):
-                        if prev_acc > acc:
+                        val_acc = self.evaluate()
+                        
+                        if prev_acc > val_acc:
                             return 0
                         else:
-                            prev_acc = acc
+                            prev_acc = val_acc
                         
                     self.save()
                 
